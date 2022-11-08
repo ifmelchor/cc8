@@ -4,6 +4,7 @@
 # GNU GPL v2 licenced to I. Melchor and J. Almendros 08/2022
 
 using Distributed
+using ProgressBars
 
 function cc8mre_run(data::Array{Float64}, xStaUTM::Vector{Float64}, yStaUTM::Vector{Float64}, pmax::Vector{Float64}, pinc::Vector{Float64}, fsem::Integer, lwin::Integer, nwin::Integer, nadv::Float64, ccerr::Float64, nini::Integer, fname::String, supfile::Union{String,Nothing})
 
@@ -16,7 +17,6 @@ function cc8mre_run(data::Array{Float64}, xStaUTM::Vector{Float64}, yStaUTM::Vec
 
   # compute
   _run(xysta, data, base, fname, supfile)  
-
 end
 
 
@@ -75,20 +75,6 @@ function _ccorrcoef(cc::Array{Float64})
 
   return (2*suma + nsta) / nsta^2
 end
-
-
-function _reshape(mat::Vector{Float64})
-  nite = convert(Int16, sqrt(size(mat, 1)))
-  smap = Array{Float64}(undef, nite, nite)
-  n::Int = 1
-  
-  for i in 1:nite, j in 1:nite
-    smap[i,j] = mat[n]
-    n = n + 1
-  end
-  
-  return smap
-end
  
 
 function _run(station_list::Vector{xySta}, data::Array{Float64}, base::BaseParams, fname::String, supfile::Union{String,Nothing})
@@ -101,10 +87,11 @@ function _run(station_list::Vector{xySta}, data::Array{Float64}, base::BaseParam
   zlcc = cal -> _ccorr(cal, base)
   
   # iterate over time
-  for n in 1:base.nwin
-    @time begin
+  for n in ProgressBar(1:base.nwin)
+    # @time begin
     nini_adv = floor(Int64, base.nadv*base.lwin) * (n-1)
     ninikk = base.nini + nini_adv
+    # println(n, "  >>>  ", ninikk, "  ::  ", ninikk + base.lwin)
     
     # define partial function for time delay
     shift_delaymap = tdelay -> _shift(ninikk, data, tdelay, base)
@@ -142,21 +129,19 @@ function _run(station_list::Vector{xySta}, data::Array{Float64}, base::BaseParam
       slow, azm = r2p(-px0, -py0)
 
       # reshape sumap into a nite x nite matrix
-      # sumap = _reshape(sumap)
       sumap = reshape(sumap, (nite, nite))
-
+      
       # get error bounds
       bds = bm2(sumap, nite, base.pmax[ip], base.pinc[ip], ccmax, base.ccerr)
 
       # save data to hdf5 file
-      # save_main_hdf(fname, ip; slow=slow, baz=azm, ccmax=ccmax, bounds=bds)
+      save_main_hdf(fname, ip; slow=slow, baz=azm, ccmax=ccmax, bounds=bds)
 
       if typeof(supfile) <: String
         # save sumap to hdf5 file
         save_sup_hdf(supfile, ip; sumap=sumap)
       end
     end
-    end
+    # (time begin) end
   end
-
 end
