@@ -58,8 +58,9 @@ end
 
 """
 
-function bm2(msum::Array{Float64}, nite::Int64, pmax::Float64, pinc::Float64, ccmax::Float64, ccerr::Float64)
+function bm2(msum::Array{Float64}, pmax::Float64, pinc::Float64, ccmax::Float64, ccerr::Float64)
 
+  nite = size(msum, 1)
   bnd = Bounds(666., -1., 666., -1.)
   q = Array{Float64}(undef, nite, nite)
 

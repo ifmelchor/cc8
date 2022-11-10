@@ -52,13 +52,10 @@ end
 
 function _ccorr(cal::Array{Float64}, base::BaseParams)
   nsta = size(cal, 1)
-  cc = Array{Float64}(undef, nsta, nsta)
+  cc = zeros(Float64, nsta, nsta)
 
   for ii in 1:nsta, jj in ii:nsta
-    cc[ii,jj] = 0.
-    for l in 1:base.lwin
-        cc[ii,jj] = cc[ii,jj] + cal[ii,l]*cal[jj,l]
-    end
+    cc[ii,jj] += sum([cal[ii,l] * cal[jj,l] for l in 1:base.lwin])
   end
 
   return cc
@@ -67,15 +64,15 @@ end
 
 function _ccorrcoef(cc::Array{Float64})
   nsta = size(cc, 1)
-  suma::Float64 = 0
 
+  suma::Float64 = 0
   for ii in 1:nsta-1, jj in ii+1:nsta
-    suma = suma + cc[ii,jj] / sqrt(cc[ii,ii]*cc[jj,jj])
+    suma += cc[ii,jj] / sqrt(cc[ii,ii]*cc[jj,jj])
   end
 
   return (2*suma + nsta) / nsta^2
 end
- 
+
 
 function _run(station_list::Vector{xySta}, data::Array{Float64}, base::BaseParams, fname::String, supfile::Union{String,Nothing})
 
@@ -87,8 +84,7 @@ function _run(station_list::Vector{xySta}, data::Array{Float64}, base::BaseParam
   zlcc = cal -> _ccorr(cal, base)
   
   # iterate over time
-  for n in ProgressBar(1:base.nwin)
-    # @time begin
+  for n in 1:base.nwin
     nini_adv = floor(Int64, base.nadv*base.lwin) * (n-1)
     ninikk = base.nini + nini_adv
     # println(n, "  >>>  ", ninikk, "  ::  ", ninikk + base.lwin)
@@ -109,10 +105,10 @@ function _run(station_list::Vector{xySta}, data::Array{Float64}, base::BaseParam
       idx = _idx(ip, nite, px0, py0, base)
 
       # time delay between stations and ref for all slowness vector (px, py)
-      delay_map = pmap(time_delay, idx)
+      delay_map = map(time_delay, idx)
       
       # shift the traces to align them in time
-      shiftmap = pmap(shift_delaymap, delay_map)
+      shiftmap = map(shift_delaymap, delay_map)
       # shiftmap is a nite^2 vector of arrays with seismic data. Each vector contain an array of dim (nsta x lwin)
 
       # calculate the zero-lag cross-correlation of the array
@@ -132,7 +128,7 @@ function _run(station_list::Vector{xySta}, data::Array{Float64}, base::BaseParam
       sumap = reshape(sumap, (nite, nite))
       
       # get error bounds
-      bds = bm2(sumap, nite, base.pmax[ip], base.pinc[ip], ccmax, base.ccerr)
+      bds = bm2(sumap, base.pmax[ip], base.pinc[ip], ccmax, base.ccerr)
 
       # save data to hdf5 file
       save_main_hdf(fname, ip; slow=slow, baz=azm, ccmax=ccmax, bounds=bds)
@@ -142,6 +138,5 @@ function _run(station_list::Vector{xySta}, data::Array{Float64}, base::BaseParam
         save_sup_hdf(supfile, ip; sumap=sumap)
       end
     end
-    # (time begin) end
   end
 end
