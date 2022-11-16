@@ -3,140 +3,115 @@
 
 # GNU GPL v2 licenced to I. Melchor and J. Almendros 08/2022
 
-using Distributed
-using ProgressBars
+using LinearAlgebra
 
-function cc8mre_run(data::Array{Float64}, xStaUTM::Vector{Float64}, yStaUTM::Vector{Float64}, pmax::Vector{Float64}, pinc::Vector{Float64}, fsem::Integer, lwin::Integer, nwin::Integer, nadv::Float64, ccerr::Float64, nini::Integer, fname::String, supfile::Union{String,Nothing})
+function run(data::Array{Float64}, xStaUTM::Vector{Float64}, yStaUTM::Vector{Float64}, pmax::Vector{Float64}, pinc::Vector{Float64}, fsem::Integer, lwin::Integer, nwin::Integer, padv::Float64, ccerr::Float64, nini::Integer)
 
-  # define baseparams
-  base = BaseParams(ccerr, fsem, lwin, nwin, nini, nadv, pmax, pinc)
+    # define baseparams
+    nsta = length(xStaUTM)
+    xysta = [xySta(xStaUTM[s], yStaUTM[s]) for s in 1:nsta]
+    refxy = refsta(xysta)
 
-  # define xysta vector
-  nsta = length(xStaUTM)
-  xysta = [xySta(xStaUTM[s], yStaUTM[s]) for s in 1:nsta]
+    cciter = []
+    for ii in 1:nsta-1
+        for jj in ii+1:nsta
+            push!(cciter, (ii, jj))
+        end
+    end
 
-  # compute
-  _run(xysta, data, base, fname, supfile)  
+    nadv = floor(Int64, padv*lwin)
+    base = BaseParams(data, xysta, refxy[1], refxy[2], ccerr, fsem, lwin, nwin, nini, padv, nadv, pmax, pinc, cciter)
+
+    res = _run(base)
+
+    return res
 end
 
 
-function _idx(ip::Integer, nite::Integer, px0::Float64, py0::Float64, base::BaseParams)
-  pxx = Array{Float64}(undef, nite)
-  pyy = Array{Float64}(undef, nite)
-  
-  for i in 1:nite
+function _idx(ip::Integer, nite::Integer, pxy0::Tuple{Float64, Float64}, base::BaseParams)
+    pxx = Array{Float64}(undef, nite)
+    pyy = Array{Float64}(undef, nite)
+    for i in 1:nite
     # for x
-    px = px0 - base.pmax[ip] + base.pinc[ip]*(i-1)
+    px = pxy0[1] - base.pmax[ip] + base.pinc[ip]*(i-1)
     pxx[i] = base.pinc[ip] * floor(Int64, px/base.pinc[ip])
     # for y
-    py = py0 - base.pmax[ip] + base.pinc[ip]*(i-1)
+    py = pxy0[2] - base.pmax[ip] + base.pinc[ip]*(i-1)
     pyy[i] = base.pinc[ip] * floor(Int64, py/base.pinc[ip])
-  end
-
-  return [(px, py) for px in pxx for py in pyy]
-end
-
-
-function _shift(ninikk::Integer, data::Array{Float64}, t::Vector{Float64}, base::BaseParams)
-  nsta = size(data, 1)
-  shiftedtraces = Array{Float64}(undef, nsta, base.lwin)
-  
-  for n in 1:nsta
-    m = ninikk + floor(Int64, base.fsem * t[n])
-    shiftedtraces[n, :] = @view data[n, 1+m:base.lwin+m]
-  end
-
-  return shiftedtraces
-end
-
-
-function _ccorr(cal::Array{Float64}, base::BaseParams)
-  nsta = size(cal, 1)
-  cc = zeros(Float64, nsta, nsta)
-
-  for ii in 1:nsta, jj in ii:nsta
-    cc[ii,jj] += sum([cal[ii,l] * cal[jj,l] for l in 1:base.lwin])
-  end
-
-  return cc
-end
-
-
-function _ccorrcoef(cc::Array{Float64})
-  nsta = size(cc, 1)
-
-  suma::Float64 = 0
-  for ii in 1:nsta-1, jj in ii+1:nsta
-    suma += cc[ii,jj] / sqrt(cc[ii,ii]*cc[jj,jj])
-  end
-
-  return (2*suma + nsta) / nsta^2
-end
-
-
-function _run(station_list::Vector{xySta}, data::Array{Float64}, base::BaseParams, fname::String, supfile::Union{String,Nothing})
-
-  # compute center location of the array
-  xref, yref = refsta(station_list)
-  
-  # define time_delay and croscorr partial funcions
-  time_delay((px, py)) = [px*(sta.x-xref) + py*(sta.y-yref) for sta in station_list]
-  zlcc = cal -> _ccorr(cal, base)
-  
-  # iterate over time
-  for n in 1:base.nwin
-    nini_adv = floor(Int64, base.nadv*base.lwin) * (n-1)
-    ninikk = base.nini + nini_adv
-    # println(n, "  >>>  ", ninikk, "  ::  ", ninikk + base.lwin)
-    
-    # define partial function for time delay
-    shift_delaymap = tdelay -> _shift(ninikk, data, tdelay, base)
-
-    # initialise variables
-    px0::Float64 = 0.
-    py0::Float64 = 0.
-
-    # iterate over slowness domain
-    for ip in 1:length(base.pmax)
-      # compute the number of iterations in slowness
-      nite = 2*floor(Int64, base.pmax[ip]/base.pinc[ip])+1
-      
-      # define the slowness intervals
-      idx = _idx(ip, nite, px0, py0, base)
-
-      # time delay between stations and ref for all slowness vector (px, py)
-      delay_map = map(time_delay, idx)
-      
-      # shift the traces to align them in time
-      shiftmap = map(shift_delaymap, delay_map)
-      # shiftmap is a nite^2 vector of arrays with seismic data. Each vector contain an array of dim (nsta x lwin)
-
-      # calculate the zero-lag cross-correlation of the array
-      ccmap = pmap(zlcc, shiftmap)
-
-      # compute the array-averaged cross-correlation coeficient
-      sumap = pmap(_ccorrcoef, ccmap)
-
-      # determine MACC (Maximum Array-averaged Cross-Correlation)
-      find_ccmax = findmax(sumap)
-      ccmax = find_ccmax[1]
-      px0 = idx[find_ccmax[2]][1]
-      py0 = idx[find_ccmax[2]][2]
-      slow, azm = r2p(-px0, -py0)
-
-      # reshape sumap into a nite x nite matrix
-      sumap = reshape(sumap, (nite, nite))
-      
-      # get error bounds
-      bds = bm2(sumap, base.pmax[ip], base.pinc[ip], ccmax, base.ccerr)
-
-      # save data to hdf5 file
-      save_main_hdf(fname, ip; slow=slow, baz=azm, ccmax=ccmax, bounds=bds)
-
-      if typeof(supfile) <: String
-        # save sumap to hdf5 file
-        save_sup_hdf(supfile, ip; sumap=sumap)
-      end
     end
-  end
+
+    return [[px, py] for px in pxx for py in pyy]
+end
+
+
+function _run(base::BaseParams)
+    # initialize variables
+
+    function _pccorr(nkk, pxy)
+        # compute delat times for each station
+        dtimes = [pxy[1]*(sta.x-base.xref) + pxy[2]*(sta.y-base.yref) for sta in base.stalist]
+        nsta = length(base.stalist)
+
+        # build cc matrix
+        cc = zeros(Float64, nsta, nsta)
+        for ii in 1:nsta
+            mii = nkk + floor(Int64, base.fsem * dtimes[ii])
+            dii = @view base.data[ii, 1+mii:base.lwin+mii]
+            for jj in ii:nsta
+                mjj = nkk + floor(Int64, base.fsem * dtimes[jj])
+                djj = @view base.data[jj, 1+mjj:base.lwin+mjj]
+                cc[ii,jj] += dot(dii,djj)
+            end
+        end
+
+        # computes crosscorr coefficient
+        suma = sum([cc[ii,jj]/sqrt(cc[ii,ii]*cc[jj,jj]) for (ii, jj) in base.citer])
+        return (2*suma + nsta) / nsta^2
+    end
+
+    pxy0 = (0.,0.)
+    procdatalist = []
+    for ip in 1:length(base.pmax)  
+        nite = 2*floor(Int64, base.pmax[ip]/base.pinc[ip])+1
+        pxylist = _idx(ip, nite, pxy0, base)
+
+        # data to store
+        maac = Array{Float64}(undef, base.nwin)
+        slow = Array{Float64}(undef, base.nwin)
+        bazm = Array{Float64}(undef, base.nwin)
+        sumap = Array{Float64}(undef, base.nwin, nite, nite)
+        
+        best_maac::Float64 = -1.
+        for nk in 1:base.nwin
+            nkk = base.nini + base.nadv*(nk-1)
+            ccmap = map(pxyl->_pccorr(nkk, pxyl), pxylist)
+            sumap[nk,:,:] = reshape(ccmap, nite, nite)
+
+            # find max
+            find_ccmax = findmax(ccmap)
+            ccmax = find_ccmax[1]
+            maac[nk] = ccmax
+            px = pxylist[find_ccmax[2]][1]
+            py = pxylist[find_ccmax[2]][2]
+            slow[nk], bazm[nk] = r2p(-px, -py)
+
+            # get the best pxy
+            if ccmax > best_maac
+                best_maac = ccmax
+                best_pxy = (px, py)
+            end
+        end
+
+        # data to save
+        push!(procdatalist, ProcessData(ip, slow, bazm, maac, sumap))
+
+        # change px0 py0 and keep computing with next slowness domain
+        if best_maac > base.ccerr
+          pxy0 = best_pxy
+        else
+          break
+        end
+    end
+
+    return procdata
 end

@@ -5,6 +5,7 @@
 
 # GNU GPL v2 licenced to I. Melchor and J. Almendros 08/2022
 
+# include("types.jl")
 
 """
   r2p(x, y)
@@ -50,13 +51,6 @@ function r2p(x::Float64, y::Float64)
   return (slowness, azimuth)
 end
 
-
-"""
-  bm2(x, y)
-
-    Get slowness and back-azimuth bounds
-
-"""
 
 function bm2(msum::Array{Float64}, pmax::Float64, pinc::Float64, ccmax::Float64, ccerr::Float64)
 
@@ -126,22 +120,13 @@ function bm2(msum::Array{Float64}, pmax::Float64, pinc::Float64, ccmax::Float64,
   return bnd
 end
 
-"""
-refsta(station_list)
-
-Determine coordinates of the central point of the array
-
-"""
 
 function refsta(station_list::Vector{xySta})
-  xref = 0.
-  yref = 0.
   nsta = length(station_list)
-
-  for sta in station_list
-    xref = xref + sta.x
-    yref = yref + sta.y
-  end
-
+  xref = sum([sta.x for sta in station_list])
+  yref = sum([sta.y for sta in station_list])
+  
   return (xref/nsta, yref/nsta)
 end
+
+

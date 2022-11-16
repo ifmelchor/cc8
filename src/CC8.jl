@@ -7,17 +7,12 @@ __precompile__()
 
 module CC8
 
+    export run
+
     include("types.jl")
-        export Bounds, xySta, BaseParams
-    
+
     include("utils.jl")
-        export r2p, bm2, refsta
-    
-    include("hdfutils.jl")
-        export save_main_hdf, save_sup_hdf
 
     include("cc8mre.jl")
-        export cc8mre_run
-
 
 end
