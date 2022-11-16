@@ -113,5 +113,5 @@ function _run(base::BaseParams)
         end
     end
 
-    return procdata
+    return procdatalist
 end

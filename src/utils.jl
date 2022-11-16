@@ -16,19 +16,14 @@
 
 function r2p(x::Float64, y::Float64)
 
-  slowness = sqrt(x^2+y^2)
+  slowness = sqrt(x^2 + y^2)
   azimuth = 180.
   
-  rad = 57.2957795 
-  
   if y < 0
-
-    azimuth = 180. + rad * atan(x/y)
+    azimuth = 180. + 180*atan(x/y)/pi
   
   elseif y > 0
-
-    azimuth = rad * atan(x/y)
-
+    azimuth = 180*atan(x/y)/pi
     if x < 0
       azimuth += 360.
     end
